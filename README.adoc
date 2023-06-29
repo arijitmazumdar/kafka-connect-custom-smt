@@ -5,7 +5,7 @@
 :hardbreaks:
 
 = kafka-connect-custom-smt
-Venky Narayanan <venkyyraghav@gmail.com>
+Arijit Mazumdar<arijit.mazumdar@gmail.com>
 
 == Overview
 Refer https://docs.confluent.io/current/connect/transforms/index.html for Kafka Connect SMT.
@@ -25,21 +25,37 @@ mvn clean package
 Transformation classes defined in this project will be picked by the connect worker after restart.
 
 == Usage
-
-=== ConvertCase
-. Operates only on KEY and VALUE of kafka record.
-. Use `convert.from.to` to convert the case of the incoming field name.
-Supports following conversions.
+Sample Connector
 +
-|===
-|**Incoming**|**Outgoing**|value|Comments
-|snake_case|camelCase|snakeunderscore2camel|From snake case with underscore (_)
-|snake-case|camelCase|snakehyphen2came|From snake case with hyphen (-)
-|camelCase|snake_case|camel2snakeunderscore|To snake case with underscore (_)
-|camelCase|snake-case|camel2snakehyphen|To snake case with hyphen (-)
-|===
-. Use `whitelist` to whitelist fields (comma-separated) for conversion.
-This limits conversion of those fields only. Rest of the fields (except structs) are ignored.
-. Use `blacklist` to blacklist fields (comma-separated) for conversion.
-This filters out fields for conversion. Rest of the fields (except structs) are considered for conversion.
-. Use `noop` to ignore conversion of those fields.
+---
+{
+  "name": "datagen-avro",
+  "config": {
+    "connector.class": "io.confluent.kafka.connect.datagen.DatagenConnector",
+    "kafka.topic": "pageviews",
+    "iterations": 20,
+    "schema.filename": "/schema/pageviews_schema.avro",
+    "schema.keyfield": "pageid",
+    "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+    "value.converter.schemas.enable": "true",
+    "value.converter": "io.confluent.connect.avro.AvroConverter",
+    "value.converter.schema.registry.url":"http://schema-registry:8081",
+    "tasks.max": "1",
+    "transforms" : "fromJson",
+    "transforms.fromJson.type" : "kafka.connect.smt.RedactPIIData$Value",
+    "transforms.fromJson.fields" : "userid",
+    "transforms.fromJson.replacement" : "**"
+  }
+}
+---
+Output
++
+---
+kcat -b localhost:9092 -C -t pageviews-string
+{"viewtime":1,"userid":"**","pageid":"Page_2"}
+{"viewtime":11,"userid":"**","pageid":"Page_18"}
+{"viewtime":21,"userid":"**","pageid":"Page_2"}
+{"viewtime":31,"userid":"**","pageid":"Page_36"}
+{"viewtime":41,"userid":"**","pageid":"Page_45"}
+---
+

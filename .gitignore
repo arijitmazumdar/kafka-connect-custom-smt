@@ -1,3 +1,4 @@
 .idea/*
 custom-smt.iml
-target/*
+target
+target/**
