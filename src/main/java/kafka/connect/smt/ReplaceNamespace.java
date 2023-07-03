@@ -29,23 +29,37 @@ import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.transforms.Transformation;
+import org.apache.kafka.connect.transforms.util.NonEmptyListValidator;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements Transformation<R> {
-    private static final Logger log = LoggerFactory.getLogger(RemoveSubNamespace.class);
+public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Transformation<R> {
+    private static final Logger log = LoggerFactory.getLogger(ReplaceNamespace.class);
     public static final String OVERVIEW_DOC = "Remove the namespace from STRUCT field name"
             + "<p/>properties.resourceOrder.properties.resourceOrderItem.items.properties.resource.properties.resourceCharacteristic.items will become items"
             + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName()
             + "</code>) or value (<code>" + Value.class.getName() + "</code>).";
 
-    public static final ConfigDef CONFIG_DEF = new ConfigDef();
     private static final String PURPOSE = "Remove the namespace from STRUCT field name";
+
+    private static final String NS_CONFIG = "namespace";
+    private static final String ROOTELEMENT_CONFIG = "root";
+    public static final ConfigDef CONFIG_DEF = new ConfigDef()
+            .define(NS_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, new ConfigDef.NonEmptyString(),
+                    ConfigDef.Importance.HIGH, "Namespace")
+            .define(ROOTELEMENT_CONFIG, ConfigDef.Type.STRING, null, new ConfigDef.NonEmptyString(),
+                    ConfigDef.Importance.LOW, "Root elementname");
+
+    private String namespace;
+    private String rootElem;
+                    
 
     @Override
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
+        namespace = config.getString(NS_CONFIG);
+        rootElem = config.getString(ROOTELEMENT_CONFIG);
     }
 
     @Override
@@ -66,7 +80,7 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
         final boolean isStruct = schema.type() == Schema.Type.STRUCT;
-        String name = (field == null || !isStruct) ? schema.name() : field.name();
+        String name = (field == null || !isStruct) ? schema.name() : namespace + "." + field.name();
         final ConnectSchema updatedSchema = new ConnectSchema(
                 schema.type(),
                 schema.isOptional(),
@@ -116,7 +130,7 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
     /**
      * Set the schema name, version or both on the record's key schema.
      */
-    public static class Key<R extends ConnectRecord<R>> extends RemoveSubNamespace<R> {
+    public static class Key<R extends ConnectRecord<R>> extends ReplaceNamespace<R> {
         @Override
         protected Schema operatingSchema(R record) {
             return record.keySchema();
@@ -138,7 +152,7 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
     /**
      * Set the schema name, version or both on the record's value schema.
      */
-    public static class Value<R extends ConnectRecord<R>> extends RemoveSubNamespace<R> {
+    public static class Value<R extends ConnectRecord<R>> extends ReplaceNamespace<R> {
         @Override
         protected Schema operatingSchema(R record) {
             return record.valueSchema();
