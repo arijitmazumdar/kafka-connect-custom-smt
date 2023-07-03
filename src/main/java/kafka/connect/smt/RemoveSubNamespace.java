@@ -16,27 +16,22 @@
  */
 package kafka.connect.smt;
 
+import static org.apache.kafka.connect.transforms.util.Requirements.requireSchema;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.kafka.common.config.ConfigDef;
-import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.ConnectSchema;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
-import org.apache.kafka.connect.transforms.util.NonEmptyListValidator;
-import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.apache.kafka.connect.transforms.Transformation;
+import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.text.FieldPosition;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.function.Function;
-
-import static org.apache.kafka.connect.transforms.util.Requirements.requireSchema;
 
 public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements Transformation<R> {
     private static final Logger log = LoggerFactory.getLogger(RemoveSubNamespace.class);
@@ -61,22 +56,28 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
             return record;
         }
         requireSchema(schema, "updating schema metadata");
+        final Schema updatedSchema = getNormalizedSchema(schema);
+        log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
+                schema, updatedSchema);
+        return newRecord(record, updatedSchema);
+    }
+
+    private Schema getNormalizedSchema(Schema schema) {
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
+        final boolean isStruct = schema.type() == Schema.Type.STRUCT;
         final Schema updatedSchema = new ConnectSchema(
                 schema.type(),
                 schema.isOptional(),
                 schema.defaultValue(),
-                removeNameSpaceFromSchemaName(schema.name()),
+                isStruct ? removeNameSpaceFromSchemaName(schema.name()) : schema.name(),
                 schema.version(),
                 schema.doc(),
                 schema.parameters(),
-                extractFields(schema.fields()),
+                isStruct ? extractFields(schema.fields()): null,
                 isMap ? schema.keySchema() : null,
-                isMap || isArray ? schema.valueSchema() : null);
-        log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
-                schema, updatedSchema);
-        return newRecord(record, updatedSchema);
+                isMap || isArray ? getNormalizedSchema(schema.valueSchema()) : null);       
+        return updatedSchema;
     }
 
     private List<Field> extractFields(List<Field> fields) {
@@ -85,26 +86,24 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
         List<Field> targetFields = new ArrayList<Field>();
         
         for (Field field : fields) {
-            log.info("ExtractFields fields:" + field);
-            if (field != null &&
-                    field.schema() != null &&
-                    field.schema().name() != null &&
-                    field.schema().name().contains(".")) {
-                final boolean isArray = field.schema().type() == Schema.Type.ARRAY;
-                final boolean isMap = field.schema().type() == Schema.Type.MAP;
-                final ConnectSchema s = new ConnectSchema(
-                        field.schema().type(),
-                        field.schema().isOptional(),
-                        field.schema().defaultValue(),
-                        field.name(),
-                        field.schema().version(),
-                        field.schema().doc(),
-                        field.schema().parameters(),
-                        field.schema().fields(),
-                        isMap ? field.schema().keySchema() : null,
-                        isMap || isArray ? field.schema().valueSchema() : null);
 
-                log.info("field:" + field);
+            final boolean isArray = field.schema().type() == Schema.Type.ARRAY;
+            final boolean isMap = field.schema().type() == Schema.Type.MAP;
+            final boolean isStruct = field.schema().type() == Schema.Type.STRUCT;
+            if (isStruct || isArray) {
+                final ConnectSchema s = new ConnectSchema(
+                field.schema().type(),
+                field.schema().isOptional(),
+                field.schema().defaultValue(),
+                field.name(),
+                field.schema().version(),
+                field.schema().doc(),
+                field.schema().parameters(),
+                extractFields(field.schema().fields()),
+                isMap ? field.schema().keySchema() : null,
+                isMap || isArray ? getNormalizedSchema(field.schema().valueSchema()) : null);
+
+                log.info("extractFields::Converted from:" + field.schema().name() + "to:"+ field.name());
                 Field nField = new Field(field.name(),
                                         field.index(),
                                         s);
@@ -117,8 +116,14 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
     }
 
     private static String removeNameSpaceFromSchemaName(String schemaName) {
-        log.info("Inside removeNameSpaceFromSchemaName:" + schemaName);
-        return schemaName;
+        if(schemaName == null || !schemaName.contains(".")) {
+            return schemaName;
+        }
+        //from: properties.resourceOrder.properties.resourceOrderItem.items.properties.resource.properties.resourceCharacteristic.items
+        //to: resourceCharacteristic
+        String[] splittedArr = schemaName.split("\\.");
+        log.info("removeNameSpaceFromSchemaName:" + splittedArr[splittedArr.length - 2]);
+        return splittedArr[splittedArr.length - 2];
     }
 
     @Override
@@ -206,12 +211,9 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
                 log.info("key:" + field + ",value:" + origStruct.get(field));
                 if(!(field.schema().type().equals(Schema.Type.STRUCT) ||
                     field.schema().type().equals(Schema.Type.ARRAY))) {
-                    log.info("In field:" + field.schema().name());
+                    //log.info("In field:" + field.schema().name());
                     newStruct.put(field, origStruct.get(field));
-                } else {
-                    log.info("Out field:" + field.schema().name());
-                    updateSchemaIn(origStruct.get(field), field.schema());
-                }
+                } 
             }
             return newStruct;
         }
