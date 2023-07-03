@@ -56,27 +56,28 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
             return record;
         }
         requireSchema(schema, "updating schema metadata");
-        final Schema updatedSchema = getNormalizedSchema(schema);
+        final Schema updatedSchema = getNormalizedSchema(null, schema);
         log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
                 schema, updatedSchema);
         return newRecord(record, updatedSchema);
     }
 
-    private Schema getNormalizedSchema(Schema schema) {
+    private ConnectSchema getNormalizedSchema(Field field, Schema schema) {
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
         final boolean isStruct = schema.type() == Schema.Type.STRUCT;
-        final Schema updatedSchema = new ConnectSchema(
+        String name = (field == null || !isStruct) ? schema.name() : field.name();
+        final ConnectSchema updatedSchema = new ConnectSchema(
                 schema.type(),
                 schema.isOptional(),
                 schema.defaultValue(),
-                isStruct ? removeNameSpaceFromSchemaName(schema.name()) : schema.name(),
+                name,
                 schema.version(),
                 schema.doc(),
                 schema.parameters(),
                 isStruct ? extractFields(schema.fields()): null,
                 isMap ? schema.keySchema() : null,
-                isMap || isArray ? getNormalizedSchema(schema.valueSchema()) : null);       
+                isMap || isArray ? getNormalizedSchema(field, schema.valueSchema()) : null);       
         return updatedSchema;
     }
 
@@ -90,40 +91,11 @@ public abstract class RemoveSubNamespace<R extends ConnectRecord<R>> implements 
             final boolean isArray = field.schema().type() == Schema.Type.ARRAY;
             final boolean isMap = field.schema().type() == Schema.Type.MAP;
             final boolean isStruct = field.schema().type() == Schema.Type.STRUCT;
-            if (isStruct || isArray) {
-                final ConnectSchema s = new ConnectSchema(
-                field.schema().type(),
-                field.schema().isOptional(),
-                field.schema().defaultValue(),
-                field.name(),
-                field.schema().version(),
-                field.schema().doc(),
-                field.schema().parameters(),
-                extractFields(field.schema().fields()),
-                isMap ? field.schema().keySchema() : null,
-                isMap || isArray ? getNormalizedSchema(field.schema().valueSchema()) : null);
-
-                log.info("extractFields::Converted from:" + field.schema().name() + "to:"+ field.name());
-                Field nField = new Field(field.name(),
-                                        field.index(),
-                                        s);
-                targetFields.add(nField);
-            } else {
-                targetFields.add(field);
-            }
+            targetFields.add((isStruct || isArray)? 
+                            new Field(field.name(), field.index(),getNormalizedSchema(field, field.schema()))
+                            : field);
         }
         return targetFields;
-    }
-
-    private static String removeNameSpaceFromSchemaName(String schemaName) {
-        if(schemaName == null || !schemaName.contains(".")) {
-            return schemaName;
-        }
-        //from: properties.resourceOrder.properties.resourceOrderItem.items.properties.resource.properties.resourceCharacteristic.items
-        //to: resourceCharacteristic
-        String[] splittedArr = schemaName.split("\\.");
-        log.info("removeNameSpaceFromSchemaName:" + splittedArr[splittedArr.length - 2]);
-        return splittedArr[splittedArr.length - 2];
     }
 
     @Override
