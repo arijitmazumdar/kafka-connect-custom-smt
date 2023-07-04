@@ -19,10 +19,12 @@ package kafka.connect.smt;
 import static org.apache.kafka.connect.transforms.util.Requirements.requireSchema;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import org.apache.kafka.common.config.ConfigDef;
+import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.connector.ConnectRecord;
 import org.apache.kafka.connect.data.ConnectSchema;
 import org.apache.kafka.connect.data.Field;
@@ -31,11 +33,12 @@ import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.transforms.Transformation;
 import org.apache.kafka.connect.transforms.util.NonEmptyListValidator;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.log4j.Logger;
+
+
 
 public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Transformation<R> {
-    private static final Logger log = LoggerFactory.getLogger(ReplaceNamespace.class);
+    private static final Logger log = Logger.getLogger(ReplaceNamespace.class);
     public static final String OVERVIEW_DOC = "Remove the namespace from STRUCT field name"
             + "<p/>properties.resourceOrder.properties.resourceOrderItem.items.properties.resource.properties.resourceCharacteristic.items will become items"
             + "<p/>Use the concrete transformation type designed for the record key (<code>" + Key.class.getName()
@@ -44,22 +47,35 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
     private static final String PURPOSE = "Remove the namespace from STRUCT field name";
 
     private static final String NS_CONFIG = "namespace";
-    private static final String ROOTELEMENT_CONFIG = "root";
+    private static final String RENAME_CONFIG = "rename";
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(NS_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, new ConfigDef.NonEmptyString(),
                     ConfigDef.Importance.HIGH, "Namespace")
-            .define(ROOTELEMENT_CONFIG, ConfigDef.Type.STRING, null, new ConfigDef.NonEmptyString(),
-                    ConfigDef.Importance.LOW, "Root elementname");
+            .define(RENAME_CONFIG, ConfigDef.Type.LIST, null, new NonEmptyListValidator(),
+                    ConfigDef.Importance.LOW, "Map of current name and target name of the element");
 
     private String namespace;
-    private String rootElem;
-                    
+    private List<String> renameList;
+    private Map<String, String> renames;                
 
     @Override
     public void configure(Map<String, ?> props) {
         final SimpleConfig config = new SimpleConfig(CONFIG_DEF, props);
         namespace = config.getString(NS_CONFIG);
-        rootElem = config.getString(ROOTELEMENT_CONFIG);
+        renameList = config.getList(RENAME_CONFIG);
+        renames = parseMap(renameList);
+    }
+
+    private Map<String, String> parseMap(List<String> renameList2) {
+        final Map<String, String> map = new HashMap<String,String>();
+        for(String mapping: renameList2) {
+            final String[] parts = mapping.split(":");
+            if( parts.length != 2) {
+                throw new ConfigException("Invalid Mapping:" + mapping);
+            }
+            map.put(parts[0], parts[1]);
+        }
+        return map;
     }
 
     @Override
@@ -71,8 +87,8 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
         }
         requireSchema(schema, "updating schema metadata");
         final Schema updatedSchema = getNormalizedSchema(null, schema);
-        log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
-                schema, updatedSchema);
+        //log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
+        //        schema, updatedSchema);
         return newRecord(record, updatedSchema);
     }
 
@@ -80,7 +96,9 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
         final boolean isStruct = schema.type() == Schema.Type.STRUCT;
-        String name = (field == null || !isStruct) ? schema.name() : namespace + "." + field.name();
+        String name = (field == null || !isStruct) ? schema.name() : 
+                        namespace + "." + (renames.containsKey(field.name()) ? 
+                                            renames.get(field.name()) : field.name());
         final ConnectSchema updatedSchema = new ConnectSchema(
                 schema.type(),
                 schema.isOptional(),
