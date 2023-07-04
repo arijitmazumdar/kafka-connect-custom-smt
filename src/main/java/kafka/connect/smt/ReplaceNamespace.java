@@ -51,7 +51,7 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(NS_CONFIG, ConfigDef.Type.STRING, ConfigDef.NO_DEFAULT_VALUE, new ConfigDef.NonEmptyString(),
                     ConfigDef.Importance.HIGH, "Namespace")
-            .define(RENAME_CONFIG, ConfigDef.Type.LIST, null, new NonEmptyListValidator(),
+            .define(RENAME_CONFIG, ConfigDef.Type.LIST, ConfigDef.NO_DEFAULT_VALUE, new NonEmptyListValidator(),
                     ConfigDef.Importance.LOW, "Map of current name and target name of the element");
 
     private String namespace;
