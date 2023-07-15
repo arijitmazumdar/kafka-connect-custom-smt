@@ -35,8 +35,6 @@ import org.apache.kafka.connect.transforms.util.NonEmptyListValidator;
 import org.apache.kafka.connect.transforms.util.SimpleConfig;
 import org.apache.log4j.Logger;
 
-
-
 public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Transformation<R> {
     private static final Logger log = Logger.getLogger(ReplaceNamespace.class);
     public static final String OVERVIEW_DOC = "Remove the namespace from STRUCT field name"
@@ -56,7 +54,8 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
 
     private String namespace;
     private List<String> renameList;
-    private Map<String, String> renames;                
+    private Map<String, String> renames;
+    private static boolean add;
 
     @Override
     public void configure(Map<String, ?> props) {
@@ -67,10 +66,10 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
     }
 
     private Map<String, String> parseMap(List<String> renameList2) {
-        final Map<String, String> map = new HashMap<String,String>();
-        for(String mapping: renameList2) {
+        final Map<String, String> map = new HashMap<String, String>();
+        for (String mapping : renameList2) {
             final String[] parts = mapping.split(":");
-            if( parts.length != 2) {
+            if (parts.length != 2) {
                 throw new ConfigException("Invalid Mapping:" + mapping);
             }
             map.put(parts[0], parts[1]);
@@ -87,8 +86,9 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
         }
         requireSchema(schema, "updating schema metadata");
         final Schema updatedSchema = getNormalizedSchema(null, schema);
-        //log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated schema: {}",
-        //        schema, updatedSchema);
+        // log.trace("Applying SetSchemaMetadata SMT. Original schema: {}, updated
+        // schema: {}",
+        // schema, updatedSchema);
         return newRecord(record, updatedSchema);
     }
 
@@ -96,9 +96,8 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
         final boolean isArray = schema.type() == Schema.Type.ARRAY;
         final boolean isMap = schema.type() == Schema.Type.MAP;
         final boolean isStruct = schema.type() == Schema.Type.STRUCT;
-        String name = (field == null || !isStruct) ? schema.name() : 
-                        namespace + "." + (renames.containsKey(field.name()) ? 
-                                            renames.get(field.name()) : field.name());
+        String name = (field == null || !isStruct) ? schema.name()
+                : namespace + "." + (renames.containsKey(field.name()) ? renames.get(field.name()) : field.name());
         final ConnectSchema updatedSchema = new ConnectSchema(
                 schema.type(),
                 schema.isOptional(),
@@ -107,9 +106,9 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
                 schema.version(),
                 schema.doc(),
                 schema.parameters(),
-                isStruct ? extractFields(schema.fields()): null,
+                isStruct ? extractFields(schema.fields()) : null,
                 isMap ? schema.keySchema() : null,
-                isMap || isArray ? getNormalizedSchema(field, schema.valueSchema()) : null);       
+                isMap || isArray ? getNormalizedSchema(field, schema.valueSchema()) : null);
         return updatedSchema;
     }
 
@@ -117,15 +116,15 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
         if (fields == null)
             return fields;
         List<Field> targetFields = new ArrayList<Field>();
-        
+
         for (Field field : fields) {
 
             final boolean isArray = field.schema().type() == Schema.Type.ARRAY;
             final boolean isMap = field.schema().type() == Schema.Type.MAP;
             final boolean isStruct = field.schema().type() == Schema.Type.STRUCT;
-            targetFields.add((isStruct || isArray)? 
-                            new Field(field.name(), field.index(),getNormalizedSchema(field, field.schema()))
-                            : field);
+            targetFields.add((isStruct || isArray)
+                    ? new Field(field.name(), field.index(), getNormalizedSchema(field, field.schema()))
+                    : field);
         }
         return targetFields;
     }
@@ -206,21 +205,70 @@ public abstract class ReplaceNamespace<R extends ConnectRecord<R>> implements Tr
      *         a copy of the key or value object with updated references to the new
      *         schema.
      */
-    protected static Object updateSchemaIn(Object keyOrValue, Schema updatedSchema) {
+    protected Object updateSchemaIn(Object keyOrValue, Schema updatedSchema) {
         if (keyOrValue instanceof Struct) {
             Struct origStruct = (Struct) keyOrValue;
             Struct newStruct = new Struct(updatedSchema);
             for (Field field : updatedSchema.fields()) {
-                // assume both schemas have exact same fields with same names and schemas ...
-                log.info("key:" + field + ",value:" + origStruct.get(field));
-                if(!(field.schema().type().equals(Schema.Type.STRUCT) ||
-                    field.schema().type().equals(Schema.Type.ARRAY))) {
-                    //log.info("In field:" + field.schema().name());
+                if (field.schema().type().equals(Schema.Type.STRUCT)) {
+                    log.info("---------Inside STRUCT--------------");
+                    log.info(String.format("Field Value Schema: %s", field.schema().name()));
+                    //log.info(String.format("Value: %s", origStruct.get(field)));
+                    newStruct.put(field, getValForStruct(field.schema(), (Struct) origStruct.get(field)));
+                } else {
+                    log.info(String.format("Field Value Schema: %s", field.name()));
                     newStruct.put(field, origStruct.get(field));
-                } 
+                }
             }
             return newStruct;
         }
         return keyOrValue;
+    }
+
+    private Struct getValForStruct(Schema newSchema, Struct oldStruct) {
+        Schema schema = oldStruct.schema();
+        Struct tmpStruct = new Struct(newSchema);
+        log.info("new schema:"+ newSchema);
+        for (Field field : schema.fields()) {
+            if (field.schema().type().equals(Schema.Type.ARRAY)) {
+                log.info("---------Inside ARRAY--------------");
+                log.info(String.format("Field Value Schema: %s", field.schema().valueSchema().name()));
+                log.info(String.format("Field Name: %s", field.name()));
+                log.info(String.format("New Schema Name: %s", newSchema));
+                log.info(String.format("New Field Value Schema: %s", newSchema.field(field.name())));
+
+                //log.info(String.format("Value: %s", oldStruct.get(field)));
+                tmpStruct.put(newSchema.field(field.name()), 
+                            getValForArray(newSchema.field(field.name()).schema().valueSchema(), 
+                                (List) oldStruct.get(field)));
+                log.info(String.format("Array completed -" + newSchema.field(field.name())));
+            } else if (field.schema().type().equals(Schema.Type.STRUCT)) {
+                log.info("---------Inside STRUCT--------------");
+                log.info(String.format("Field Name: %s", field.name()));
+                log.info(String.format("New Schema Name: %s", newSchema));
+                log.info(String.format("Value: %s", oldStruct.get(field)));
+                tmpStruct.put(newSchema.field(field.name()), getValForStruct(newSchema.field(field.name()).schema(), 
+                        (Struct) oldStruct.get(field)));
+            } else {
+                log.info(String.format("Field Value Schema: %s", field.name()));
+                tmpStruct.put(field, oldStruct.get(field));
+            }
+        }
+        log.info(String.format("Final Struct-%s",tmpStruct), null);
+        return tmpStruct;
+    }
+
+    private Object getValForArray(Schema newSchema, List<Struct> oldStructList) {
+        if (oldStructList == null)
+            return oldStructList;
+        
+        List<Struct> tmpStructList = new ArrayList<Struct>(oldStructList.size());
+        for (Object object : oldStructList) {
+            if (object instanceof Struct) {
+                add = tmpStructList.add(getValForStruct(newSchema, (Struct) object));
+                log.info("Inside getValForArray, element added:" + add);
+            }
+        }
+        return tmpStructList;
     }
 }
